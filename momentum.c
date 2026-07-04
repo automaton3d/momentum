@@ -1,12 +1,13 @@
 #include "momentum.h"
 #include <stdlib.h>
+#include <string.h>
 
 Cell (*grid)[L][L] = NULL;
 Cell (*grid_next)[L][L] = NULL;
 int tick = 0;
 
 void init_momentum(void) {
-    grid = malloc(sizeof(Cell) * L * L * L);
+    grid      = malloc(sizeof(Cell) * L * L * L);
     grid_next = malloc(sizeof(Cell) * L * L * L);
     if (!grid || !grid_next) exit(1);
 
@@ -16,8 +17,16 @@ void init_momentum(void) {
         grid[x][y][z].pB = grid_next[x][y][z].pB = 0;
         grid[x][y][z].r2 = grid_next[x][y][z].r2 = INF_R2;
     }
+
+    // Semente inicial no centro
     grid[MID][MID][MID].pB = 1;
 }
+
+static const int dirs[6][3] = {
+    {1,0,0}, {-1,0,0},
+    {0,1,0}, {0,-1,0},
+    {0,0,1}, {0,0,-1}
+};
 
 void step_momentum(void) {
     for (int x = 0; x < L; x++)
@@ -26,9 +35,25 @@ void step_momentum(void) {
         grid_next[x][y][z] = grid[x][y][z];
     }
 
-    int z_pos = MID + (tick / 4);   // crescimento lento e controlado
-    if (z_pos < L) {
-        grid_next[MID][MID][z_pos].pB = 1;
+    for (int x = 1; x < L-1; x++)
+    for (int y = 1; y < L-1; y++)
+    for (int z = MID; z < L-1; z++) {          // só acima do centro
+        if (grid[x][y][z].pB) {
+            grid_next[x][y][z].pB = 1;         // mantém-se
+            continue;
+        }
+
+        // Regra muito restrita para linha fina:
+        // Ativa apenas se:
+        // - Tem vizinho imediatamente abaixo (z-1)
+        // - E está alinhado com o centro (x,y próximos de MID)
+        int has_below = (grid[x][y][z-1].pB);
+
+        int aligned = (abs(x - MID) == 0 && abs(y - MID) == 0);
+
+        if (has_below && aligned) {
+            grid_next[x][y][z].pB = 1;
+        }
     }
 
     Cell (*tmp)[L][L] = grid;
@@ -38,45 +63,126 @@ void step_momentum(void) {
 }
 
 #ifndef NO_SDL
-void render_momentum(SDL_Renderer *ren) {
-    SDL_SetRenderDrawColor(ren, 10, 10, 30, 255);
+void render_momentum(SDL_Renderer *ren)
+{
+    const int WIN_W = 1280;
+    const int WIN_H = 800;
+
+    const int scale = 4;
+
+    const int ox = WIN_W / 2;
+    const int oy = WIN_H / 2;
+
+    SDL_SetRenderDrawColor(ren, 12,12,20,255);
     SDL_RenderClear(ren);
+    
+    //-------------------------------------------------
+    // Percorre TODA a grade
+    //-------------------------------------------------
 
-    const int scale = 2;
-    const int ox = 150;
-    const int oy = 100;
+    for (int s = 0; s <= 3*(L-1); s++)
+    {
+        for (int x = 0; x < L; x++)
+        for (int y = 0; y < L; y++)
+        {
+            int z = s - x - y;
 
-    int cx = ox + MID * scale;
-    int cy = oy + MID * scale;
+            if (z < 0 || z >= L)
+                continue;
 
-    // Slice XY central
-    for (int x = 0; x < L; x += 1)
-    for (int y = 0; y < L; y += 1) {
-        if (grid[x][y][MID].pB) {
-            SDL_SetRenderDrawColor(ren, 0, 255, 255, 255);
-            SDL_FRect r = {(float)(ox + x*scale), (float)(oy + y*scale), (float)scale, (float)scale};
-            SDL_RenderFillRect(ren, &r);
+            if (!grid[x][y][z].pB)
+                continue;
+
+            //------------------------------------------
+            // projeção isométrica
+            //------------------------------------------
+
+            int dx = x - MID;
+            int dy = y - MID;
+            int dz = z - MID;
+
+            int sx = ox + (dx - dy) * scale;
+            int sy = oy - dz * scale + (dx + dy) * scale / 2;
+            //------------------------------------------
+            // cor depende da profundidade
+            //------------------------------------------
+
+            Uint8 g = 40 + 215*z/L;
+
+            SDL_SetRenderDrawColor(
+                ren,
+                0,
+                g,
+                255,
+                255);
+
+            SDL_FRect r =
+            {
+                (float)sx,
+                (float)sy,
+                (float)scale,
+                (float)scale
+            };
+
+            SDL_RenderFillRect(ren,&r);
         }
     }
 
-    // Eixos cruzando o centro
-    SDL_SetRenderDrawColor(ren, 200, 200, 200, 255);
-    SDL_RenderLine(ren, (float)ox, (float)cy, (float)(ox + L*scale), (float)cy);           // X
-    SDL_RenderLine(ren, (float)cx, (float)oy, (float)cx, (float)(oy + L*scale));           // Y
+    //-------------------------------------------------
+    // desenha os três eixos
+    //-------------------------------------------------
 
-    // Linha Z lateral (vertical)
-    int sx = ox + L*scale + 80;
-    SDL_SetRenderDrawColor(ren, 0, 240, 255, 255);
-    for (int i = 0; i <= (tick / 4); i++) {
-        if (MID + i >= L) break;
-        SDL_FRect r = {(float)sx, (float)(oy + i*scale), 25.0f, (float)scale};
-        SDL_RenderFillRect(ren, &r);
-    }
+    SDL_SetRenderDrawColor(ren,220,220,220,255);
+
+//-------------------------------------------------
+// eixo X (vermelho)
+//-------------------------------------------------
+
+SDL_SetRenderDrawColor(ren,255,80,80,255);
+
+SDL_RenderLine(
+    ren,
+    ox,
+    oy,
+    ox + (L/2)*scale,
+    oy + (L/4)*scale);
+
+//-------------------------------------------------
+// eixo Y (verde)
+//-------------------------------------------------
+
+SDL_SetRenderDrawColor(ren,80,255,80,255);
+
+SDL_RenderLine(
+    ren,
+    ox,
+    oy,
+    ox,
+    oy - (L/2)*scale);
+
+//-------------------------------------------------
+// eixo Z (azul)
+//-------------------------------------------------
+
+SDL_SetRenderDrawColor(ren,80,160,255,255);
+
+SDL_RenderLine(
+    ren,
+    ox,
+    oy,
+    ox - (L/2)*scale,
+    oy + (L/4)*scale);
 }
 
 int main(void) {
     SDL_Init(SDL_INIT_VIDEO);
-    SDL_Window *window = SDL_CreateWindow("Momentum - Linha pB no eixo Z", 1600, 1000, 0);
+    SDL_Window *window =
+        SDL_CreateWindow(
+            "Momentum - Isometric",
+            1280,   // 1600 × 0.8
+            800,    // 1000 × 0.8
+            0);
+
     SDL_Renderer *renderer = SDL_CreateRenderer(window, NULL);
 
     init_momentum();
